@@ -209,27 +209,26 @@ impl MarketDataProcessor {
         
         // Calculate latencies
         let now = Timestamp::now();
-        let processing_latency = (now.secs - receive_timestamp.secs) * 1_000_000_000 + 
-                               (now.nanos - receive_timestamp.nanos) as i64;
+        let processing_latency = if now.secs > receive_timestamp.secs {
+            (now.secs - receive_timestamp.secs) * 1_000_000_000 + 
+            (now.nanos as i64 - receive_timestamp.nanos as i64)
+        } else if now.secs == receive_timestamp.secs && now.nanos >= receive_timestamp.nanos {
+            now.nanos as i64 - receive_timestamp.nanos as i64
+        } else {
+            0
+        };
         
         // Get timestamps in milliseconds
-        let receive_time_ms = (receive_timestamp.secs * 1000) as u64 + 
+        let receive_time_ms = receive_timestamp.secs as u64 * 1000 + 
                             (receive_timestamp.nanos as u64 / 1_000_000);
         let current_time_ms = (now.secs * 1000) as u64 + 
                             (now.nanos as u64 / 1_000_000);
 
-        // Calculate actual network latency using receive time
-        let network_latency_ms = if receive_time_ms >= update.event_time {
-            receive_time_ms - update.event_time
+        // Network latency is the difference between event time and receive time
+        let network_latency_ms = if update.event_time > receive_time_ms {
+            update.event_time - receive_time_ms  // Event is in the future relative to receive time
         } else {
-            0 // If receive time is before event time, something is wrong with the clocks
-        };
-
-        // Calculate clock offset
-        let clock_offset_ms = if update.event_time > current_time_ms {
-            update.event_time - current_time_ms
-        } else {
-            current_time_ms - update.event_time
+            receive_time_ms - update.event_time  // Event is in the past relative to receive time
         };
 
         self.latency_stats.add(processing_latency);
@@ -241,11 +240,7 @@ impl MarketDataProcessor {
             println!("Current time (ms):  {}", current_time_ms);
             println!("Event time (ms):    {}", update.event_time);
             println!("Receive time (ms):  {}", receive_time_ms);
-            println!("Clock offset (ms):  {}", clock_offset_ms);
-            println!("\nLatency Stats:");
-            println!("Processing (µs) - Min: {}, Max: {}, Avg: {}", 
-                min / 1000, max / 1000, avg / 1000);
-            println!("Network (ms) - Actual: {}", network_latency_ms);
+            println!("Network latency (ms): {}", network_latency_ms);
             self.last_stats_time = SystemTime::now();
         }
         
